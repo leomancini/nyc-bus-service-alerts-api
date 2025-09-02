@@ -1,0 +1,9 @@
+{
+  "service_id": "nyc-bus-service-alerts-api",
+  "service_name": "NYC Bus Service Alerts API",
+  "domain": "https://nyc-bus-service-alerts-api.noshado.ws",
+  "host": "localhost",
+  "port": "3114",
+  "author": "leo",
+  "created_on": "Tue 02 Sep 2025 12:29:25 AM EDT"
+}
