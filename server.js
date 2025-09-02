@@ -51,7 +51,7 @@ app.get("/", (req, res) => {
   res.send("Hello world!");
 });
 
-app.get("/alerts/today", requireApiKey, async (req, res) => {
+app.get("/alerts", requireApiKey, async (req, res) => {
   try {
     // Check if we have valid cached data
     if (isCacheValid()) {
@@ -91,7 +91,7 @@ app.get("/alerts/today", requireApiKey, async (req, res) => {
   }
 });
 
-app.get("/alerts/today/summaries", requireApiKey, async (req, res) => {
+app.get("/summaries", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
     const maxCharacters = parseInt(req.query.maxCharacters) || null;
