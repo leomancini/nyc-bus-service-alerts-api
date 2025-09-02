@@ -6,6 +6,7 @@ import {
   fetchFromAPI,
   updateCacheInBackground,
   getSummariesFromData,
+  getLCDSummariesFromData,
   formatAlertsResponse
 } from "./utils/index.js";
 
@@ -111,32 +112,29 @@ app.get("/alerts", requireApiKey, async (req, res) => {
 app.get("/summaries", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
-    const maxCharacters = parseInt(req.query.maxCharacters) || null;
-    const maxStrings = parseInt(req.query.maxStrings) || 50; // Default to 50 strings
+    const maxAlerts = parseInt(req.query.maxAlerts) || 10; // Default to 10 alerts for LCD
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
 
     // Check if we have valid cached data
     if (isCacheValid()) {
-      const summaries = getSummariesFromData(
+      const summaries = getLCDSummariesFromData(
         cache.data,
-        maxCharacters,
-        maxStrings,
+        maxAlerts,
         maxDuration
       );
-      return res.json(summaries);
+      return res.json({ summaries });
     }
 
     // Check if we have any cached data (even if expired)
     if (cache.data) {
-      const summaries = getSummariesFromData(
+      const summaries = getLCDSummariesFromData(
         cache.data,
-        maxCharacters,
-        maxStrings,
+        maxAlerts,
         maxDuration
       );
-      res.json(summaries);
+      res.json({ summaries });
 
       // Update cache in background (don't await)
       updateCacheInBackground().catch(() => {});
@@ -149,20 +147,21 @@ app.get("/summaries", requireApiKey, async (req, res) => {
       cache.data = freshData;
       cache.timestamp = Date.now();
 
-      const summaries = getSummariesFromData(
+      const summaries = getLCDSummariesFromData(
         freshData,
-        maxCharacters,
-        maxStrings,
+        maxAlerts,
         maxDuration
       );
-      res.json(summaries);
+      res.json({ summaries });
     } catch (fetchError) {
       throw fetchError;
     }
   } catch (error) {
-    res
-      .status(500)
-      .json([`Error: Failed to fetch bus alert summaries - ${error.message}`]);
+    res.status(500).json({
+      error: "Failed to fetch bus alert summaries",
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
