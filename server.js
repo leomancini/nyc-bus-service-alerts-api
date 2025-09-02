@@ -14,11 +14,44 @@ dotenv.config();
 const app = express();
 const port = 3114;
 
+// API Key authentication middleware
+const requireApiKey = (req, res, next) => {
+  const providedApiKey = req.query.apiKey;
+  const validApiKey = process.env.NOSHADOWS_NYC_BUS_SERVICE_ALERTS_API_KEY;
+
+  if (!validApiKey) {
+    return res.status(500).json({
+      error: "Server configuration error",
+      message: "API key not configured on server",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (!providedApiKey) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message:
+        "API key is required. Please provide apiKey parameter in the URL",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (providedApiKey !== validApiKey) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "Invalid API key",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  next();
+};
+
 app.get("/", (req, res) => {
   res.send("Hello world!");
 });
 
-app.get("/alerts/today", async (req, res) => {
+app.get("/alerts/today", requireApiKey, async (req, res) => {
   try {
     // Check if we have valid cached data
     if (isCacheValid()) {
@@ -58,7 +91,7 @@ app.get("/alerts/today", async (req, res) => {
   }
 });
 
-app.get("/alerts/today/summaries", async (req, res) => {
+app.get("/alerts/today/summaries", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
     const maxCharacters = parseInt(req.query.maxCharacters) || null;
@@ -104,9 +137,9 @@ app.get("/alerts/today/summaries", async (req, res) => {
       throw fetchError;
     }
   } catch (error) {
-    res.status(500).json([
-      `Error: Failed to fetch bus alert summaries - ${error.message}`
-    ]);
+    res
+      .status(500)
+      .json([`Error: Failed to fetch bus alert summaries - ${error.message}`]);
   }
 });
 
