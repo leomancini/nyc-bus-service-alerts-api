@@ -53,17 +53,30 @@ app.get("/", (req, res) => {
 
 app.get("/alerts", requireApiKey, async (req, res) => {
   try {
+    // Parse query parameters
+    const maxDuration = req.query.maxDuration
+      ? parseInt(req.query.maxDuration)
+      : null;
+
     // Check if we have valid cached data
     if (isCacheValid()) {
       // Return cached data immediately - no background update needed
-      const result = formatAlertsResponse(cache.data, cache.timestamp);
+      const result = formatAlertsResponse(
+        cache.data,
+        cache.timestamp,
+        maxDuration
+      );
       return res.json(result);
     }
 
     // Check if we have any cached data (even if expired)
     if (cache.data) {
       // Return cached data immediately
-      const result = formatAlertsResponse(cache.data, cache.timestamp);
+      const result = formatAlertsResponse(
+        cache.data,
+        cache.timestamp,
+        maxDuration
+      );
       res.json(result);
 
       // Update cache in background (don't await)
@@ -77,7 +90,11 @@ app.get("/alerts", requireApiKey, async (req, res) => {
       cache.data = freshData;
       cache.timestamp = Date.now();
 
-      const result = formatAlertsResponse(freshData, cache.timestamp);
+      const result = formatAlertsResponse(
+        freshData,
+        cache.timestamp,
+        maxDuration
+      );
       res.json(result);
     } catch (fetchError) {
       throw fetchError;
@@ -96,13 +113,17 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     // Parse query parameters
     const maxCharacters = parseInt(req.query.maxCharacters) || null;
     const maxStrings = parseInt(req.query.maxStrings) || 50; // Default to 50 strings
+    const maxDuration = req.query.maxDuration
+      ? parseInt(req.query.maxDuration)
+      : null;
 
     // Check if we have valid cached data
     if (isCacheValid()) {
       const summaries = getSummariesFromData(
         cache.data,
         maxCharacters,
-        maxStrings
+        maxStrings,
+        maxDuration
       );
       return res.json(summaries);
     }
@@ -112,7 +133,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
       const summaries = getSummariesFromData(
         cache.data,
         maxCharacters,
-        maxStrings
+        maxStrings,
+        maxDuration
       );
       res.json(summaries);
 
@@ -130,7 +152,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
       const summaries = getSummariesFromData(
         freshData,
         maxCharacters,
-        maxStrings
+        maxStrings,
+        maxDuration
       );
       res.json(summaries);
     } catch (fetchError) {

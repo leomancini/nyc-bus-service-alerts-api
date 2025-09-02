@@ -1,4 +1,4 @@
-import { isRelevantForToday } from "./dateUtils.js";
+import { isRelevantForToday, isWithinDurationLimit } from "./dateUtils.js";
 import { splitSummary } from "./textUtils.js";
 
 // Function to extract and process situations from API data
@@ -10,8 +10,13 @@ export function extractSituations(data) {
 }
 
 // Function to filter and sort situations for today
-export function processTodaysSituations(situations) {
-  const todaysSituations = situations.filter(isRelevantForToday);
+export function processTodaysSituations(situations, maxDuration = null) {
+  const todaysSituations = situations.filter((situation) => {
+    return (
+      isRelevantForToday(situation) &&
+      isWithinDurationLimit(situation, maxDuration)
+    );
+  });
 
   // Sort by start time (most recent first), fallback to creation time
   todaysSituations.sort((a, b) => {
@@ -29,6 +34,20 @@ export function processTodaysSituations(situations) {
   });
 
   return todaysSituations;
+}
+
+// Helper function to format time as "3:32pm"
+function formatTime(date) {
+  let hours = date.getHours();
+  const minutes = date.getMinutes();
+  const ampm = hours >= 12 ? "pm" : "am";
+
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+
+  const minutesStr = minutes < 10 ? `0${minutes}` : minutes;
+
+  return `${hours}:${minutesStr}${ampm}`;
 }
 
 // Function to format summary with effective dates
@@ -101,6 +120,7 @@ export function formatSummaryWithDates(situation) {
     const startMonth = startDateObj.getMonth();
     const startDay = startDateObj.getDate();
     const startYear = startDateObj.getFullYear();
+    const startTime = formatTime(startDateObj);
     const monthNames = [
       "Jan",
       "Feb",
@@ -115,8 +135,8 @@ export function formatSummaryWithDates(situation) {
       "Nov",
       "Dec"
     ];
-    const formattedDate = `${monthNames[startMonth]} ${startDay}, ${startYear}`;
-    summary = `${formattedDate} – ongoing: ${summary}`;
+    const formattedDate = `${monthNames[startMonth]} ${startDay}, ${startYear} ${startTime}`;
+    summary = `${formattedDate} – now: ${summary}`;
   }
 
   return summary;
@@ -168,17 +188,26 @@ export function processSummaries(
 }
 
 // Helper function to get summaries from data
-export function getSummariesFromData(data, maxCharacters, maxStrings = 50) {
+export function getSummariesFromData(
+  data,
+  maxCharacters,
+  maxStrings = 50,
+  maxDuration = null
+) {
   const situations = extractSituations(data);
-  const todaysSituations = processTodaysSituations(situations);
+  const todaysSituations = processTodaysSituations(situations, maxDuration);
   return processSummaries(todaysSituations, maxCharacters, maxStrings);
 }
 
 // Function to process and format the API data for full alerts response
-export function formatAlertsResponse(data, cacheAge = null) {
+export function formatAlertsResponse(
+  data,
+  cacheAge = null,
+  maxDuration = null
+) {
   try {
     const situations = extractSituations(data);
-    const todaysSituations = processTodaysSituations(situations);
+    const todaysSituations = processTodaysSituations(situations, maxDuration);
 
     // Format the response
     return {
@@ -189,6 +218,7 @@ export function formatAlertsResponse(data, cacheAge = null) {
         : null, // age in minutes
       totalSituations: situations.length,
       situationsForToday: todaysSituations.length,
+      maxDurationFilter: maxDuration ? `${maxDuration} days` : null,
       alerts: todaysSituations.map((situation) => ({
         summary: situation.Summary,
         description: situation.Description,

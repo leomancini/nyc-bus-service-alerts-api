@@ -85,3 +85,57 @@ export function isRelevantForToday(situation) {
     return false;
   }
 }
+
+// Function to calculate duration in days between start and end dates
+export function calculateDurationInDays(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) {
+    return null; // Cannot calculate duration without both dates
+  }
+
+  try {
+    const startTime = new Date(startTimeStr);
+    const endTime = new Date(endTimeStr);
+
+    // Check if dates are valid
+    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+      return null;
+    }
+
+    // Calculate difference in milliseconds, then convert to days
+    const diffInMs = endTime.getTime() - startTime.getTime();
+    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+
+    return diffInDays;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Function to check if a situation's duration is within the specified limit
+export function isWithinDurationLimit(situation, maxDurationDays) {
+  if (!maxDurationDays) {
+    return true; // No limit specified, include all situations
+  }
+
+  const publicationWindow = situation.PublicationWindow;
+  if (!publicationWindow) {
+    return true; // No publication window, include by default
+  }
+
+  const startTimeStr = publicationWindow.StartTime;
+  const endTimeStr = publicationWindow.EndTime;
+
+  // If there's no end time (ongoing alert), include it
+  if (!endTimeStr) {
+    return true;
+  }
+
+  const duration = calculateDurationInDays(startTimeStr, endTimeStr);
+
+  // If we can't calculate duration, include it by default
+  if (duration === null) {
+    return true;
+  }
+
+  return duration <= maxDurationDays;
+}
