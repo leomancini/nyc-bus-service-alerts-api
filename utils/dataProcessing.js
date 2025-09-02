@@ -237,13 +237,52 @@ function wrapText(text, maxLength) {
         lines.push(currentLine);
       }
 
-      // If the word itself is longer than maxLength, put it on its own line anyway
-      // Don't break the word - let it be handled at display time
-      currentLine = word;
+      // If the word itself is longer than maxLength, we have a problem
+      // This shouldn't happen with normal text, but if it does, we need to handle it
+      if (word.length > maxLength) {
+        console.warn("Word exceeds maxLength:", word, "maxLength:", maxLength);
+        // For now, just put it on its own line and let it be handled later
+        currentLine = word;
+      } else {
+        // Start a new line with this word
+        currentLine = word;
+      }
     }
   }
 
   if (currentLine) lines.push(currentLine);
+
+  // Verify that all original words are preserved
+  const originalWords = text.split(" ").filter((w) => w.trim());
+  const wrappedWords = lines
+    .join(" ")
+    .split(" ")
+    .filter((w) => w.trim());
+
+  // If we lost any words, this is a critical error - we should never lose content
+  if (originalWords.length !== wrappedWords.length) {
+    console.error("CRITICAL ERROR: Text wrapping lost words:", {
+      original: originalWords,
+      wrapped: wrappedWords,
+      originalText: text,
+      wrappedText: lines.join(" ")
+    });
+    // As a fallback, return the original text as a single line
+    return [text];
+  }
+
+  // Verify that no line exceeds maxLength
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > maxLength) {
+      console.error("CRITICAL ERROR: Line exceeds maxLength:", {
+        line: lines[i],
+        length: lines[i].length,
+        maxLength: maxLength,
+        lineIndex: i
+      });
+    }
+  }
+
   return lines;
 }
 
@@ -253,8 +292,8 @@ function truncateToLength(line, maxLength) {
 
   // Try to find a good break point at a word boundary
   const lastSpace = line.lastIndexOf(" ", maxLength);
-  if (lastSpace > maxLength * 0.6) {
-    // Don't truncate too early (keep at least 60% of chars)
+  if (lastSpace > maxLength * 0.7) {
+    // Don't truncate too early (keep at least 70% of chars instead of 60%)
     return line.substring(0, lastSpace).trim();
   }
 
@@ -262,8 +301,40 @@ function truncateToLength(line, maxLength) {
   return line.slice(0, maxLength).trim();
 }
 
+// Helper to rebuild a continuation screen by prepending remainder and re-wrapping
+function rebuildContinuationScreen(nextScreenLines, prefixText, maxCharacters) {
+  const normalizedLines = (nextScreenLines || []).map((l) => (l || "").trim());
+  const existingJoined = normalizedLines
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ");
+  const combined = [prefixText, existingJoined]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  // Wrap full combined text; reserve 3 chars for leading ellipsis on first line
+  const wrapped = wrapText(combined, maxCharacters);
+  const result = ["", "", "", ""];
+
+  if (wrapped.length > 0) {
+    const firstCore = wrapped[0] || "";
+    const firstWithEllipsis = `...${firstCore}`;
+    result[0] =
+      firstWithEllipsis.length <= maxCharacters
+        ? firstWithEllipsis
+        : `...${truncateToLength(firstCore, maxCharacters - 3)}`;
+  }
+
+  for (let i = 1; i < 4; i++) {
+    result[i] = wrapped[i] ? truncateToLength(wrapped[i], maxCharacters) : "";
+  }
+
+  return result;
+}
+
 // Function to format a single situation for 20x4 LCD display, returning multiple screens if needed
-function formatSituationForLCD(situation) {
+function formatSituationForLCD(situation, maxCharacters = 20) {
   const screens = [];
 
   // Extract basic info
@@ -354,7 +425,6 @@ function formatSituationForLCD(situation) {
 
   // Create description, being smart about route duplication
   let description = summary;
-
   if (affectedRoutes.length > 0) {
     const routeText = affectedRoutes.slice(0, 3).join(", ");
 
@@ -371,21 +441,20 @@ function formatSituationForLCD(situation) {
   }
 
   // Wrap description into lines
-  const allLines = wrapText(description, 20);
-
+  const allLines = wrapText(description, maxCharacters);
   // Create first screen
   const firstScreen = ["", "", "", ""];
 
-  // Ensure date line fits in 20 characters without breaking words
-  firstScreen[0] = truncateToLength(dateLine, 20);
+  // Ensure date line fits in maxCharacters without breaking words
+  firstScreen[0] = truncateToLength(dateLine, maxCharacters);
 
   // Try to fit some description on first line if there's space
-  const remainingSpaceOnLine0 = 20 - firstScreen[0].length;
+  const remainingSpaceOnLine0 = maxCharacters - firstScreen[0].length;
   let remainingLines = [...allLines];
 
   if (remainingSpaceOnLine0 > 3 && firstScreen[0].trim() && remainingLines[0]) {
     const testLine = `${firstScreen[0]} ${remainingLines[0]}`.trim();
-    if (testLine.length <= 20) {
+    if (testLine.length <= maxCharacters) {
       firstScreen[0] = testLine;
       remainingLines.shift();
     }
@@ -394,7 +463,7 @@ function formatSituationForLCD(situation) {
 
   // Fill rest of first screen
   for (let i = 1; i < 4 && remainingLines.length > 0; i++) {
-    firstScreen[i] = truncateToLength(remainingLines.shift() || "", 20);
+    firstScreen[i] = remainingLines.shift() || "";
   }
 
   screens.push(firstScreen.map((line) => line.trim()));
@@ -405,17 +474,53 @@ function formatSituationForLCD(situation) {
 
     // Fill the continuation screen
     for (let i = 0; i < 4 && remainingLines.length > 0; i++) {
-      screen[i] = truncateToLength(remainingLines.shift() || "", 20);
+      screen[i] = remainingLines.shift() || "";
     }
 
     screens.push(screen.map((line) => line.trim()));
   }
 
-  // Add screen counters if there are multiple screens
+  // Add ellipsis to first line of continuation screens and counters to all screens
   if (screens.length > 1) {
+    // Track which screens have been updated by text movement to avoid double-processing
+    const updatedByTextMovement = new Array(screens.length).fill(false);
+
     for (let screenIndex = 0; screenIndex < screens.length; screenIndex++) {
+      const isFirstScreen = screenIndex === 0;
+      const isLastScreen = screenIndex === screens.length - 1;
       const counter = `(${screenIndex + 1}/${screens.length})`;
       const screen = screens[screenIndex];
+
+      // Add ellipsis to first non-empty line of continuation screens
+      // Only if this screen hasn't been updated by text movement
+      if (!isFirstScreen && !updatedByTextMovement[screenIndex]) {
+        for (let lineIndex = 0; lineIndex < 4; lineIndex++) {
+          if (screen[lineIndex].trim()) {
+            // Add ellipsis to beginning of first non-empty line
+            const originalLine = screen[lineIndex];
+            const lineWithEllipsis = `...${originalLine}`;
+
+            if (lineWithEllipsis.length <= maxCharacters) {
+              screen[lineIndex] = lineWithEllipsis;
+            } else {
+              // Check if truncating would lose too much text
+              const maxLineLength = maxCharacters - 3; // Account for "..."
+              if (maxLineLength >= originalLine.length - 1) {
+                // Only truncate if we lose at most 1 character
+                const truncatedLine = truncateToLength(
+                  originalLine,
+                  maxLineLength
+                );
+                screen[lineIndex] = `...${truncatedLine}`;
+              } else {
+                // Would lose too much text, skip ellipsis to preserve content
+                screen[lineIndex] = originalLine;
+              }
+            }
+            break; // Only modify the first non-empty line
+          }
+        }
+      }
 
       // Find the last non-empty line to add the counter
       let lastLineIndex = 3;
@@ -425,97 +530,49 @@ function formatSituationForLCD(situation) {
 
       if (lastLineIndex >= 0) {
         const currentLine = screen[lastLineIndex];
-        const newLine = `${currentLine} ${counter}`;
 
-        if (newLine.length <= 20) {
+        // For non-final screens, trim trailing spaces before adding ellipsis
+        let lineToProcess = currentLine;
+        if (!isLastScreen) {
+          lineToProcess = currentLine.trim();
+        }
+
+        // Double-check: ensure no trailing spaces before adding counter
+        lineToProcess = lineToProcess.trim();
+
+        // For non-final screens, add ellipsis to the text before the counter
+        const textWithEllipsis = isLastScreen
+          ? lineToProcess
+          : `${lineToProcess}...`;
+        const newLine = `${textWithEllipsis} ${counter}`;
+
+        if (newLine.length <= maxCharacters) {
           screen[lastLineIndex] = newLine;
         } else {
-          // Try to fit counter on current line by truncating
-          const maxContentLength = 20 - counter.length - 1; // -1 for space
-          if (maxContentLength > 5) {
-            // Only if we have reasonable space
-            const truncated = truncateToLength(currentLine, maxContentLength);
-            const remainingText = currentLine
-              .substring(truncated.length)
-              .trim();
-
-            // If there's remaining text and this is the last screen, try to preserve it
-            if (remainingText && screenIndex === screens.length - 1) {
-              // This is the final screen - prioritize keeping words together
-              // First, try to put the counter on a new line to keep the full text
-              if (lastLineIndex < 3 && !screen[lastLineIndex + 1].trim()) {
-                // Put counter on next line, keep original line intact
-                screen[lastLineIndex + 1] = counter;
-                // Don't modify the current line - keep "stops are missed" together
-              } else {
-                // No empty line available, try to fit remaining text on a new line
-                let foundEmptyLine = false;
-                for (let lineIdx = lastLineIndex + 1; lineIdx < 4; lineIdx++) {
-                  if (!screen[lineIdx].trim()) {
-                    screen[lineIdx] = truncateToLength(remainingText, 20);
-                    foundEmptyLine = true;
-                    break;
-                  }
-                }
-
-                if (foundEmptyLine) {
-                  // Successfully placed remaining text, now add counter
-                  screen[lastLineIndex] = `${truncated} ${counter}`;
-                } else {
-                  // Really last resort - truncate but keep as much as possible
-                  screen[lastLineIndex] = `${truncated} ${counter}`;
-                }
-              }
-            } else {
+          // ALWAYS try to put counter on next line first to avoid losing words
+          if (lastLineIndex < 3) {
+            // Put counter on next line, keep original line intact
+            screen[lastLineIndex + 1] = counter;
+            // Keep the original line with ellipsis if needed
+            screen[lastLineIndex] = textWithEllipsis.length <= maxCharacters ? textWithEllipsis : lineToProcess;
+          } else {
+            // Last line, no choice but to fit on same line - but try to minimize truncation
+            const maxContentLength = maxCharacters - counter.length - 1; // -1 for space
+            if (maxContentLength >= lineToProcess.length - 1) {
+              // Only truncate if we lose at most 1 character
+              const truncated = truncateToLength(
+                lineToProcess,
+                maxContentLength
+              );
               screen[lastLineIndex] = `${truncated} ${counter}`;
-
-              // If there's remaining text and a next screen, prepend it to the next screen
-              if (remainingText && screenIndex < screens.length - 1) {
-                const nextScreen = screens[screenIndex + 1];
-                // Find first non-empty line in next screen to prepend the remaining text
-                let firstNonEmptyIndex = 0;
-                while (
-                  firstNonEmptyIndex < 4 &&
-                  !nextScreen[firstNonEmptyIndex].trim()
-                ) {
-                  firstNonEmptyIndex++;
-                }
-
-                if (firstNonEmptyIndex < 4) {
-                  // Combine remaining text with first line of next screen
-                  const combinedLine =
-                    `${remainingText} ${nextScreen[firstNonEmptyIndex]}`.trim();
-                  const wrappedCombined = wrapText(combinedLine, 20);
-
-                  // Replace the first line and potentially add more lines
-                  nextScreen[firstNonEmptyIndex] = wrappedCombined[0] || "";
-
-                  // If wrapping created multiple lines, try to fit them
-                  for (
-                    let j = 1;
-                    j < wrappedCombined.length && firstNonEmptyIndex + j < 4;
-                    j++
-                  ) {
-                    // Shift existing content down if possible
-                    if (!nextScreen[firstNonEmptyIndex + j].trim()) {
-                      nextScreen[firstNonEmptyIndex + j] = wrappedCombined[j];
-                    } else {
-                      // If we can't fit it cleanly, just take the first wrapped line
-                      break;
-                    }
-                  }
-                }
+            } else {
+              // Would lose too much text, just put counter on its own and keep text intact
+              screen[lastLineIndex] = lineToProcess;
+              // Add counter info to first line of screen if possible
+              if (screen[0].length + counter.length + 1 <= maxCharacters) {
+                screen[0] = `${screen[0]} ${counter}`;
               }
             }
-          } else if (lastLineIndex < 3) {
-            // Move to next line if possible
-            screen[lastLineIndex + 1] = counter;
-          } else {
-            // Force fit on current line
-            screen[lastLineIndex] = truncateToLength(
-              `${currentLine} ${counter}`,
-              20
-            );
           }
         }
       } else {
@@ -531,7 +588,8 @@ function formatSituationForLCD(situation) {
 // Function to get LCD-formatted summaries from data
 export function getLCDSummariesFromData(
   data,
-  maxAlerts = 10,
+  maxCharacters = null,
+  maxStrings = 50,
   maxDuration = null
 ) {
   const situations = extractSituations(data);
@@ -539,9 +597,21 @@ export function getLCDSummariesFromData(
 
   // Format each situation and flatten the screens
   const allScreens = [];
-  for (let i = 0; i < Math.min(todaysSituations.length, maxAlerts); i++) {
-    const situationScreens = formatSituationForLCD(todaysSituations[i]);
+  let summaryCount = 0;
+
+  for (let i = 0; i < todaysSituations.length; i++) {
+    // Check if adding this summary would exceed maxStrings
+    if (maxStrings && summaryCount >= maxStrings) {
+      break;
+    }
+
+    const situationScreens = formatSituationForLCD(
+      todaysSituations[i],
+      maxCharacters
+    );
+
     allScreens.push(...situationScreens);
+    summaryCount++; // Count each situation as 1 summary, regardless of how many screens it uses
   }
 
   return allScreens;

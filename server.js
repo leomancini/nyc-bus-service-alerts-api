@@ -112,7 +112,8 @@ app.get("/alerts", requireApiKey, async (req, res) => {
 app.get("/summaries", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
-    const maxAlerts = parseInt(req.query.maxAlerts) || 10; // Default to 10 alerts for LCD
+    const maxCharacters = parseInt(req.query.maxCharacters) || null;
+    const maxStrings = parseInt(req.query.maxStrings) || 50; // Default to 50 strings
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
@@ -121,7 +122,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     if (isCacheValid()) {
       const summaries = getLCDSummariesFromData(
         cache.data,
-        maxAlerts,
+        maxCharacters,
+        maxStrings,
         maxDuration
       );
       return res.json({ summaries });
@@ -131,7 +133,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     if (cache.data) {
       const summaries = getLCDSummariesFromData(
         cache.data,
-        maxAlerts,
+        maxCharacters,
+        maxStrings,
         maxDuration
       );
       res.json({ summaries });
@@ -149,7 +152,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
 
       const summaries = getLCDSummariesFromData(
         freshData,
-        maxAlerts,
+        maxCharacters,
+        maxStrings,
         maxDuration
       );
       res.json({ summaries });
