@@ -1,5 +1,4 @@
 import { isRelevantForToday, isWithinDurationLimit } from "./dateUtils.js";
-import { splitSummary } from "./textUtils.js";
 
 // Function to extract and process situations from API data
 export function extractSituations(data) {
@@ -143,6 +142,77 @@ export function formatSummaryWithDates(situation) {
   return summary;
 }
 
+// Helper function to wrap text into lines without breaking words - with word preservation verification
+function wrapTextIntoLines(text, maxCharacters) {
+  if (!text || !maxCharacters) return [""];
+
+  // Clean up text: replace newlines with spaces, normalize whitespace
+  const cleanText = text.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleanText) return [""];
+
+  const originalWords = cleanText.split(" ").filter((word) => word.trim());
+  const lines = [];
+  let currentLine = "";
+
+  for (const word of originalWords) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (testLine.length <= maxCharacters) {
+      currentLine = testLine;
+    } else {
+      // Current line is full, save it and start a new line
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+      currentLine = word;
+
+      // Handle extremely long words
+      if (word.length > maxCharacters) {
+        console.warn(
+          `Word "${word}" exceeds maxCharacters (${maxCharacters}), keeping intact`
+        );
+      }
+    }
+  }
+
+  // Don't forget the last line
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  // Verify all words are preserved
+  const resultWords = lines
+    .join(" ")
+    .split(" ")
+    .filter((word) => word.trim());
+  if (originalWords.length !== resultWords.length) {
+    console.error("WORD LOSS DETECTED!", {
+      original: originalWords,
+      result: resultWords,
+      originalCount: originalWords.length,
+      resultCount: resultWords.length,
+      lost: originalWords.filter((w) => !resultWords.includes(w))
+    });
+    // Fallback: return original text as single line to preserve content
+    return [cleanText];
+  }
+
+  // Double check each word is preserved
+  for (let i = 0; i < originalWords.length; i++) {
+    if (originalWords[i] !== resultWords[i]) {
+      console.error("WORD ORDER CHANGED!", {
+        originalWord: originalWords[i],
+        resultWord: resultWords[i],
+        index: i
+      });
+      // Fallback: return original text as single line
+      return [cleanText];
+    }
+  }
+
+  return lines.length > 0 ? lines : [""];
+}
+
 // Function to process summaries with optional limit and max strings
 export function processSummaries(
   situations,
@@ -151,41 +221,192 @@ export function processSummaries(
 ) {
   let summaries = situations.map(formatSummaryWithDates).filter(Boolean);
 
-  // Apply character limit if specified (this creates grouped parts per summary)
-  if (maxCharacters) {
-    const summaryGroups = summaries.map((summary) =>
-      splitSummary(summary, maxCharacters)
-    );
+  if (!maxCharacters) {
+    // No character limit, return summaries as single-line screens
+    const screens = summaries.map((summary) => [summary, "", "", ""]);
+    return maxStrings ? screens.slice(0, maxStrings) : screens;
+  }
 
-    // Smart limiting: never truncate in middle of a multi-part summary
-    if (maxStrings) {
-      const result = [];
-      let currentLineCount = 0;
+  // Convert each summary into screen objects
+  const allScreens = [];
+  let processedSummaries = 0;
 
-      for (const group of summaryGroups) {
-        // Check if adding this entire group would exceed maxStrings
-        if (currentLineCount + group.length <= maxStrings) {
-          result.push(...group);
-          currentLineCount += group.length;
+  for (const summary of summaries) {
+    if (maxStrings && processedSummaries >= maxStrings) {
+      break;
+    }
+
+    const summaryScreens = createScreensForSummary(summary, maxCharacters);
+    allScreens.push(...summaryScreens);
+    processedSummaries++;
+  }
+
+  return allScreens;
+}
+
+// Revolutionary approach: Reserve space for decorative elements UPFRONT, never truncate content
+function createScreensForSummary(summary, maxCharacters) {
+  if (!summary || !maxCharacters) return [["", "", "", ""]];
+
+  // Get all words from the summary
+  const cleanText = summary.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  const allWords = cleanText.split(" ").filter((word) => word.trim());
+
+  console.log("Original summary:", summary);
+  console.log("Total words:", allWords.length, allWords);
+
+  if (allWords.length === 0) return [["", "", "", ""]];
+
+  // PHASE 1: Build screens with conservative space allocation (assume we'll need ellipsis/counters)
+  const screens = [];
+  let wordIndex = 0;
+
+  // Reserve space for the maximum possible decorative elements
+  const maxCounterLength = 7; // " (99/99)" - generous estimate
+  const ellipsisLength = 3; // "..."
+
+  while (wordIndex < allWords.length) {
+    const screen = ["", "", "", ""];
+    const screenIndex = screens.length;
+    const isFirstScreen = screenIndex === 0;
+
+    // Fill lines in this screen with reserved space
+    for (
+      let lineIndex = 0;
+      lineIndex < 4 && wordIndex < allWords.length;
+      lineIndex++
+    ) {
+      let availableSpace = maxCharacters;
+      let currentLine = "";
+
+      // Reserve space for leading ellipsis on first line of continuation screens
+      if (lineIndex === 0 && !isFirstScreen) {
+        availableSpace -= ellipsisLength;
+        currentLine = "...";
+      }
+
+      // Reserve space for counter on the last line (we don't know which line will be last yet)
+      // So we reserve on all lines to be safe, but only apply on the actual last line later
+      const isLastLine = lineIndex === 3;
+      if (isLastLine) {
+        availableSpace -= maxCounterLength;
+        // Also reserve for trailing ellipsis if this might not be the final screen
+        availableSpace -= ellipsisLength;
+      }
+
+      // Fill remaining space with words
+      let isFirstWordOnLine = currentLine === "" || currentLine === "...";
+      while (wordIndex < allWords.length) {
+        const word = allWords[wordIndex];
+        const separator = isFirstWordOnLine ? "" : " ";
+        const testLine = `${currentLine}${separator}${word}`;
+
+        if (testLine.length <= availableSpace) {
+          currentLine = testLine;
+          wordIndex++;
+          isFirstWordOnLine = false;
         } else {
-          // Would exceed limit, so stop here (don't add partial group)
-          break;
+          break; // Word doesn't fit in available space
         }
       }
 
-      return result;
-    } else {
-      // No string limit, just flatten all groups
-      return summaryGroups.flat();
+      screen[lineIndex] = currentLine.trim();
+
+      // If we've used all words, break
+      if (wordIndex >= allWords.length) break;
+    }
+
+    screens.push(screen);
+  }
+
+  console.log(
+    "Screens with conservative space allocation:",
+    JSON.stringify(screens, null, 2)
+  );
+
+  // PHASE 2: Add decorative elements only where they fit without displacing content
+  if (screens.length > 1) {
+    for (let screenIndex = 0; screenIndex < screens.length; screenIndex++) {
+      const screen = screens[screenIndex];
+      const counter = `(${screenIndex + 1}/${screens.length})`;
+
+      // Find the last non-empty line
+      let lastNonEmptyIndex = 3;
+      while (lastNonEmptyIndex >= 0 && !screen[lastNonEmptyIndex].trim()) {
+        lastNonEmptyIndex--;
+      }
+
+      if (lastNonEmptyIndex >= 0) {
+        const originalLine = screen[lastNonEmptyIndex];
+        const isNotLastScreen = screenIndex < screens.length - 1;
+
+        // Try to add decorative elements only if they fit
+        let finalLine = originalLine.trim();
+
+        // Add trailing ellipsis if not the last screen
+        if (isNotLastScreen) {
+          const withEllipsis = `${finalLine}...`;
+          if (withEllipsis.length <= maxCharacters - counter.length - 1) {
+            finalLine = withEllipsis;
+          }
+        }
+
+        // Add counter
+        const withCounter = `${finalLine} ${counter}`;
+        if (withCounter.length <= maxCharacters) {
+          screen[lastNonEmptyIndex] = withCounter;
+        } else if (lastNonEmptyIndex < 3) {
+          // Put counter on next line if available
+          screen[lastNonEmptyIndex + 1] = counter;
+          screen[lastNonEmptyIndex] = finalLine;
+        } else {
+          // Can't fit counter - just keep original content
+          screen[lastNonEmptyIndex] = finalLine;
+          console.log(
+            `Counter ${counter} doesn't fit, keeping original content`
+          );
+        }
+      } else {
+        // Empty screen, just put counter
+        screen[0] = counter;
+      }
     }
   }
 
-  // No character limit, just apply string limit if specified
-  if (maxStrings) {
-    summaries = summaries.slice(0, maxStrings);
+  console.log(
+    "Final screens with decorative elements:",
+    JSON.stringify(screens, null, 2)
+  );
+
+  // VERIFICATION: Ensure all words are preserved
+  const finalText = screens
+    .map((screen) =>
+      screen
+        .join(" ")
+        .replace(/\.\.\./g, "") // Remove ellipsis
+        .replace(/\(\d+\/\d+\)/g, "") // Remove counters
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const finalWords = finalText.split(" ").filter((word) => word.trim());
+
+  if (allWords.length !== finalWords.length) {
+    console.error("WORD COUNT MISMATCH!");
+    console.error("Original words:", allWords.length, allWords);
+    console.error("Final words:", finalWords.length, finalWords);
+    console.error(
+      "Missing words:",
+      allWords.filter((w) => !finalWords.includes(w))
+    );
+  } else {
+    console.log("✓ All words preserved!");
   }
 
-  return summaries;
+  return screens;
 }
 
 // Helper function to get summaries from data
@@ -200,391 +421,6 @@ export function getSummariesFromData(
   return processSummaries(todaysSituations, maxCharacters, maxStrings);
 }
 
-// Helper function to format time as "6:23pm"
-function formatTimeShort(date) {
-  let hours = date.getHours();
-  const minutes = date.getMinutes();
-  const ampm = hours >= 12 ? "pm" : "am";
-
-  hours = hours % 12;
-  hours = hours ? hours : 12; // the hour '0' should be '12'
-
-  const minutesStr = minutes < 10 ? `0${minutes}` : minutes;
-
-  return `${hours}:${minutesStr}${ampm}`;
-}
-
-// Helper function to wrap text intelligently to fit within character limits without breaking words
-function wrapText(text, maxLength) {
-  if (!text || text.length <= maxLength) return [text || ""];
-
-  // Replace any newlines with spaces to ensure clean text processing
-  text = text.replace(/\n/g, " ");
-
-  const words = text.split(" ");
-  const lines = [];
-  let currentLine = "";
-
-  for (const word of words) {
-    // Check if adding this word would exceed the limit
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-
-    if (testLine.length <= maxLength) {
-      currentLine = testLine;
-    } else {
-      // Current line is full, start a new line
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-
-      // If the word itself is longer than maxLength, we have a problem
-      // This shouldn't happen with normal text, but if it does, we need to handle it
-      if (word.length > maxLength) {
-        console.warn("Word exceeds maxLength:", word, "maxLength:", maxLength);
-        // For now, just put it on its own line and let it be handled later
-        currentLine = word;
-      } else {
-        // Start a new line with this word
-        currentLine = word;
-      }
-    }
-  }
-
-  if (currentLine) lines.push(currentLine);
-
-  // Verify that all original words are preserved
-  const originalWords = text.split(" ").filter((w) => w.trim());
-  const wrappedWords = lines
-    .join(" ")
-    .split(" ")
-    .filter((w) => w.trim());
-
-  // If we lost any words, this is a critical error - we should never lose content
-  if (originalWords.length !== wrappedWords.length) {
-    console.error("CRITICAL ERROR: Text wrapping lost words:", {
-      original: originalWords,
-      wrapped: wrappedWords,
-      originalText: text,
-      wrappedText: lines.join(" ")
-    });
-    // As a fallback, return the original text as a single line
-    return [text];
-  }
-
-  // Verify that no line exceeds maxLength
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].length > maxLength) {
-      console.error("CRITICAL ERROR: Line exceeds maxLength:", {
-        line: lines[i],
-        length: lines[i].length,
-        maxLength: maxLength,
-        lineIndex: i
-      });
-    }
-  }
-
-  return lines;
-}
-
-// Helper function to safely truncate a line to maxLength, preferring word boundaries
-function truncateToLength(line, maxLength) {
-  if (!line || line.length <= maxLength) return line;
-
-  // Try to find a good break point at a word boundary
-  const lastSpace = line.lastIndexOf(" ", maxLength);
-  if (lastSpace > maxLength * 0.7) {
-    // Don't truncate too early (keep at least 70% of chars instead of 60%)
-    return line.substring(0, lastSpace).trim();
-  }
-
-  // If no good word boundary, just truncate
-  return line.slice(0, maxLength).trim();
-}
-
-// Helper to rebuild a continuation screen by prepending remainder and re-wrapping
-function rebuildContinuationScreen(nextScreenLines, prefixText, maxCharacters) {
-  const normalizedLines = (nextScreenLines || []).map((l) => (l || "").trim());
-  const existingJoined = normalizedLines
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ");
-  const combined = [prefixText, existingJoined]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  // Wrap full combined text; reserve 3 chars for leading ellipsis on first line
-  const wrapped = wrapText(combined, maxCharacters);
-  const result = ["", "", "", ""];
-
-  if (wrapped.length > 0) {
-    const firstCore = wrapped[0] || "";
-    const firstWithEllipsis = `...${firstCore}`;
-    result[0] =
-      firstWithEllipsis.length <= maxCharacters
-        ? firstWithEllipsis
-        : `...${truncateToLength(firstCore, maxCharacters - 3)}`;
-  }
-
-  for (let i = 1; i < 4; i++) {
-    result[i] = wrapped[i] ? truncateToLength(wrapped[i], maxCharacters) : "";
-  }
-
-  return result;
-}
-
-// Function to format a single situation for 20x4 LCD display, returning multiple screens if needed
-function formatSituationForLCD(situation, maxCharacters = 20) {
-  const screens = [];
-
-  // Extract basic info
-  let summary = situation.Summary || "";
-  summary = summary.replace(/\.$/, ""); // Remove trailing period
-  summary = summary.replace(/\n/g, " "); // Replace newlines with spaces
-
-  // Get affected routes
-  const affectedRoutes = [
-    ...new Set(
-      situation.Affects?.VehicleJourneys?.AffectedVehicleJourney?.map(
-        (journey) => journey.LineRef?.replace(/^(MTA NYCT_|MTABC_)/, "") || ""
-      ).filter(Boolean) || []
-    )
-  ];
-
-  // Format dates
-  const startDateObj = situation.PublicationWindow?.StartTime
-    ? new Date(situation.PublicationWindow.StartTime)
-    : null;
-  const endDateObj = situation.PublicationWindow?.EndTime
-    ? new Date(situation.PublicationWindow.EndTime)
-    : null;
-
-  const monthNames = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec"
-  ];
-
-  let dateLine = "";
-
-  // Format date line
-  if (startDateObj && endDateObj) {
-    const startMonth = startDateObj.getMonth();
-    const startDay = startDateObj.getDate();
-    const startYear = startDateObj.getFullYear();
-    const endMonth = endDateObj.getMonth();
-    const endDay = endDateObj.getDate();
-    const endYear = endDateObj.getFullYear();
-
-    if (
-      startMonth === endMonth &&
-      startDay === endDay &&
-      startYear === endYear
-    ) {
-      dateLine = `${monthNames[startMonth]} ${startDay}, ${startYear}:`;
-    } else if (startYear === endYear) {
-      if (startMonth === endMonth) {
-        dateLine = `${monthNames[startMonth]} ${startDay}-${endDay}, ${startYear}:`;
-      } else {
-        dateLine = `${monthNames[startMonth]} ${startDay}-${monthNames[endMonth]} ${endDay}, ${startYear}:`;
-      }
-    } else {
-      dateLine = `${monthNames[startMonth]} ${startDay}, ${startYear}-${monthNames[endMonth]} ${endDay}, ${endYear}:`;
-    }
-  } else if (startDateObj) {
-    const startMonth = startDateObj.getMonth();
-    const startDay = startDateObj.getDate();
-    const startTime = formatTimeShort(startDateObj);
-    dateLine = `${monthNames[startMonth]} ${startDay}, ${startTime} - now:`;
-  }
-
-  // If date line is too long, truncate intelligently
-  if (dateLine.length > 20) {
-    // Try shorter format
-    if (startDateObj && endDateObj) {
-      const startMonth = startDateObj.getMonth();
-      const startDay = startDateObj.getDate();
-      const endDay = endDateObj.getDate();
-      dateLine = `${monthNames[startMonth]} ${startDay}-${endDay}:`;
-    } else if (startDateObj) {
-      const startMonth = startDateObj.getMonth();
-      const startDay = startDateObj.getDate();
-      const startTime = formatTimeShort(startDateObj);
-      dateLine = `${monthNames[startMonth]} ${startDay}, ${startTime}-now:`;
-    }
-  }
-
-  // Create description, being smart about route duplication
-  let description = summary;
-  if (affectedRoutes.length > 0) {
-    const routeText = affectedRoutes.slice(0, 3).join(", ");
-
-    // Check if routes are already mentioned in the summary
-    const summaryLower = summary.toLowerCase();
-    const routesAlreadyMentioned = affectedRoutes.some((route) =>
-      summaryLower.includes(route.toLowerCase())
-    );
-
-    // Only prepend route info if not already in summary
-    if (!routesAlreadyMentioned) {
-      description = `${routeText} ${description}`;
-    }
-  }
-
-  // Wrap description into lines
-  const allLines = wrapText(description, maxCharacters);
-  // Create first screen
-  const firstScreen = ["", "", "", ""];
-
-  // Ensure date line fits in maxCharacters without breaking words
-  firstScreen[0] = truncateToLength(dateLine, maxCharacters);
-
-  // Try to fit some description on first line if there's space
-  const remainingSpaceOnLine0 = maxCharacters - firstScreen[0].length;
-  let remainingLines = [...allLines];
-
-  if (remainingSpaceOnLine0 > 3 && firstScreen[0].trim() && remainingLines[0]) {
-    const testLine = `${firstScreen[0]} ${remainingLines[0]}`.trim();
-    if (testLine.length <= maxCharacters) {
-      firstScreen[0] = testLine;
-      remainingLines.shift();
-    }
-    // If it doesn't fit, just leave it for the next line - don't try to partially fit
-  }
-
-  // Fill rest of first screen
-  for (let i = 1; i < 4 && remainingLines.length > 0; i++) {
-    firstScreen[i] = remainingLines.shift() || "";
-  }
-
-  screens.push(firstScreen.map((line) => line.trim()));
-
-  // Create additional screens if needed
-  while (remainingLines.length > 0) {
-    const screen = ["", "", "", ""];
-
-    // Fill the continuation screen
-    for (let i = 0; i < 4 && remainingLines.length > 0; i++) {
-      screen[i] = remainingLines.shift() || "";
-    }
-
-    screens.push(screen.map((line) => line.trim()));
-  }
-
-  // Add ellipsis to first line of continuation screens and counters to all screens
-  if (screens.length > 1) {
-    // Track which screens have been updated by text movement to avoid double-processing
-    const updatedByTextMovement = new Array(screens.length).fill(false);
-
-    for (let screenIndex = 0; screenIndex < screens.length; screenIndex++) {
-      const isFirstScreen = screenIndex === 0;
-      const isLastScreen = screenIndex === screens.length - 1;
-      const counter = `(${screenIndex + 1}/${screens.length})`;
-      const screen = screens[screenIndex];
-
-      // Add ellipsis to first non-empty line of continuation screens
-      // Only if this screen hasn't been updated by text movement
-      if (!isFirstScreen && !updatedByTextMovement[screenIndex]) {
-        for (let lineIndex = 0; lineIndex < 4; lineIndex++) {
-          if (screen[lineIndex].trim()) {
-            // Add ellipsis to beginning of first non-empty line
-            const originalLine = screen[lineIndex];
-            const lineWithEllipsis = `...${originalLine}`;
-
-            if (lineWithEllipsis.length <= maxCharacters) {
-              screen[lineIndex] = lineWithEllipsis;
-            } else {
-              // Check if truncating would lose too much text
-              const maxLineLength = maxCharacters - 3; // Account for "..."
-              if (maxLineLength >= originalLine.length - 1) {
-                // Only truncate if we lose at most 1 character
-                const truncatedLine = truncateToLength(
-                  originalLine,
-                  maxLineLength
-                );
-                screen[lineIndex] = `...${truncatedLine}`;
-              } else {
-                // Would lose too much text, skip ellipsis to preserve content
-                screen[lineIndex] = originalLine;
-              }
-            }
-            break; // Only modify the first non-empty line
-          }
-        }
-      }
-
-      // Find the last non-empty line to add the counter
-      let lastLineIndex = 3;
-      while (lastLineIndex >= 0 && !screen[lastLineIndex].trim()) {
-        lastLineIndex--;
-      }
-
-      if (lastLineIndex >= 0) {
-        const currentLine = screen[lastLineIndex];
-
-        // For non-final screens, trim trailing spaces before adding ellipsis
-        let lineToProcess = currentLine;
-        if (!isLastScreen) {
-          lineToProcess = currentLine.trim();
-        }
-
-        // Double-check: ensure no trailing spaces before adding counter
-        lineToProcess = lineToProcess.trim();
-
-        // For non-final screens, add ellipsis to the text before the counter
-        const textWithEllipsis = isLastScreen
-          ? lineToProcess
-          : `${lineToProcess}...`;
-        const newLine = `${textWithEllipsis} ${counter}`;
-
-        if (newLine.length <= maxCharacters) {
-          screen[lastLineIndex] = newLine;
-        } else {
-          // ALWAYS try to put counter on next line first to avoid losing words
-          if (lastLineIndex < 3) {
-            // Put counter on next line, keep original line intact
-            screen[lastLineIndex + 1] = counter;
-            // Keep the original line with ellipsis if needed
-            screen[lastLineIndex] = textWithEllipsis.length <= maxCharacters ? textWithEllipsis : lineToProcess;
-          } else {
-            // Last line, no choice but to fit on same line - but try to minimize truncation
-            const maxContentLength = maxCharacters - counter.length - 1; // -1 for space
-            if (maxContentLength >= lineToProcess.length - 1) {
-              // Only truncate if we lose at most 1 character
-              const truncated = truncateToLength(
-                lineToProcess,
-                maxContentLength
-              );
-              screen[lastLineIndex] = `${truncated} ${counter}`;
-            } else {
-              // Would lose too much text, just put counter on its own and keep text intact
-              screen[lastLineIndex] = lineToProcess;
-              // Add counter info to first line of screen if possible
-              if (screen[0].length + counter.length + 1 <= maxCharacters) {
-                screen[0] = `${screen[0]} ${counter}`;
-              }
-            }
-          }
-        }
-      } else {
-        // All lines are empty, put counter on first line
-        screen[0] = counter;
-      }
-    }
-  }
-
-  return screens;
-}
-
 // Function to get LCD-formatted summaries from data
 export function getLCDSummariesFromData(
   data,
@@ -595,26 +431,8 @@ export function getLCDSummariesFromData(
   const situations = extractSituations(data);
   const todaysSituations = processTodaysSituations(situations, maxDuration);
 
-  // Format each situation and flatten the screens
-  const allScreens = [];
-  let summaryCount = 0;
-
-  for (let i = 0; i < todaysSituations.length; i++) {
-    // Check if adding this summary would exceed maxStrings
-    if (maxStrings && summaryCount >= maxStrings) {
-      break;
-    }
-
-    const situationScreens = formatSituationForLCD(
-      todaysSituations[i],
-      maxCharacters
-    );
-
-    allScreens.push(...situationScreens);
-    summaryCount++; // Count each situation as 1 summary, regardless of how many screens it uses
-  }
-
-  return allScreens;
+  // Use the new screen-based summaries logic
+  return processSummaries(todaysSituations, maxCharacters, maxStrings);
 }
 
 // Function to process and format the API data for full alerts response
