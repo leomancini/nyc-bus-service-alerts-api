@@ -9,6 +9,7 @@ import {
   getLCDSummariesFromData,
   formatAlertsResponse
 } from "./utils/index.js";
+import { getSampleData } from "./utils/sampleData.js";
 
 dotenv.config();
 
@@ -20,19 +21,25 @@ const requireApiKey = (req, res, next) => {
   const providedApiKey = req.query.apiKey;
   const validApiKey = process.env.NOSHADOWS_NYC_BUS_SERVICE_ALERTS_API_KEY;
 
-  if (!validApiKey) {
-    return res.status(500).json({
-      error: "Server configuration error",
-      message: "API key not configured on server",
-      timestamp: new Date().toISOString()
-    });
-  }
-
   if (!providedApiKey) {
     return res.status(401).json({
       error: "Unauthorized",
       message:
         "API key is required. Please provide apiKey parameter in the URL",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // Allow demo mode
+  if (providedApiKey === "DEMO") {
+    req.isDemoMode = true;
+    return next();
+  }
+
+  if (!validApiKey) {
+    return res.status(500).json({
+      error: "Server configuration error",
+      message: "API key not configured on server",
       timestamp: new Date().toISOString()
     });
   }
@@ -58,6 +65,18 @@ app.get("/alerts", requireApiKey, async (req, res) => {
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
+
+    // Handle demo mode
+    if (req.isDemoMode) {
+      const sampleData = getSampleData();
+      const result = formatAlertsResponse(sampleData, Date.now(), maxDuration);
+      return res.json({
+        ...result,
+        demoMode: true,
+        message:
+          "✨ Welcome to the Magical NYC Bus Alerts Demo! ✨ This fantastical data is for demonstration purposes only - no actual unicorns, dragons, or chocolate rivers are harming real NYC buses (probably)."
+      });
+    }
 
     // Check if we have valid cached data
     if (isCacheValid()) {
@@ -117,6 +136,23 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
+
+    // Handle demo mode
+    if (req.isDemoMode) {
+      const sampleData = getSampleData();
+      const summaries = getLCDSummariesFromData(
+        sampleData,
+        maxCharacters,
+        maxStrings,
+        maxDuration
+      );
+      return res.json({
+        summaries,
+        demoMode: true,
+        message:
+          "✨ Welcome to the Magical NYC Bus Alerts Demo! ✨ This fantastical data is for demonstration purposes only - no actual unicorns, dragons, or chocolate rivers are harming real NYC buses (probably)."
+      });
+    }
 
     // Check if we have valid cached data
     if (isCacheValid()) {
