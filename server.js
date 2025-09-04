@@ -70,12 +70,7 @@ app.get("/alerts", requireApiKey, async (req, res) => {
     if (req.isDemoMode) {
       const sampleData = getSampleData();
       const result = formatAlertsResponse(sampleData, Date.now(), maxDuration);
-      return res.json({
-        ...result,
-        demoMode: true,
-        message:
-          "✨ Welcome to the Magical NYC Bus Alerts Demo! ✨ This fantastical data is for demonstration purposes only - no actual unicorns, dragons, or chocolate rivers are harming real NYC buses (probably)."
-      });
+      return res.json(result);
     }
 
     // Check if we have valid cached data
@@ -146,12 +141,7 @@ app.get("/summaries", requireApiKey, async (req, res) => {
         maxStrings,
         maxDuration
       );
-      return res.json({
-        summaries,
-        demoMode: true,
-        message:
-          "✨ Welcome to the Magical NYC Bus Alerts Demo! ✨ This fantastical data is for demonstration purposes only - no actual unicorns, dragons, or chocolate rivers are harming real NYC buses (probably)."
-      });
+      return res.json({ summaries });
     }
 
     // Check if we have valid cached data
