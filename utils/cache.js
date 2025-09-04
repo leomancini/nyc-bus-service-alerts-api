@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Cache configuration
-const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in milliseconds
+const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes in milliseconds
 let cache = {
   data: null,
   timestamp: null,
