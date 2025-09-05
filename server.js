@@ -19,7 +19,7 @@ const port = 3114;
 
 // Configure CORS
 const corsOptions = {
-  origin: ["https://rolodex-os.fcc.lol", "http://localhost:5173"],
+  origin: ["https://rolodex-os.fcc.lol", "http://localhost:5173"], // For Zach
   credentials: true
 };
 
