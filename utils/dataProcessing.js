@@ -252,9 +252,6 @@ function createScreensForSummary(summary, maxCharacters) {
   const cleanText = summary.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
   const allWords = cleanText.split(" ").filter((word) => word.trim());
 
-  console.log("Original summary:", summary);
-  console.log("Total words:", allWords.length, allWords);
-
   if (allWords.length === 0) return [["", "", "", ""]];
 
   // PHASE 1: Build screens with conservative space allocation (assume we'll need ellipsis/counters)
@@ -319,11 +316,6 @@ function createScreensForSummary(summary, maxCharacters) {
     screens.push(screen);
   }
 
-  console.log(
-    "Screens with conservative space allocation:",
-    JSON.stringify(screens, null, 2)
-  );
-
   // PHASE 2: Add decorative elements only where they fit without displacing content
   if (screens.length > 1) {
     for (let screenIndex = 0; screenIndex < screens.length; screenIndex++) {
@@ -362,9 +354,6 @@ function createScreensForSummary(summary, maxCharacters) {
         } else {
           // Can't fit counter - just keep original content
           screen[lastNonEmptyIndex] = finalLine;
-          console.log(
-            `Counter ${counter} doesn't fit, keeping original content`
-          );
         }
       } else {
         // Empty screen, just put counter
@@ -372,11 +361,6 @@ function createScreensForSummary(summary, maxCharacters) {
       }
     }
   }
-
-  console.log(
-    "Final screens with decorative elements:",
-    JSON.stringify(screens, null, 2)
-  );
 
   // VERIFICATION: Ensure all words are preserved
   const finalText = screens
@@ -402,8 +386,6 @@ function createScreensForSummary(summary, maxCharacters) {
       "Missing words:",
       allWords.filter((w) => !finalWords.includes(w))
     );
-  } else {
-    console.log("✓ All words preserved!");
   }
 
   return screens;
