@@ -17,13 +17,8 @@ dotenv.config();
 const app = express();
 const port = 3114;
 
-// Configure CORS
-const corsOptions = {
-  origin: ["https://rolodex-os.fcc.lol", "http://localhost:5173"], // For Zach
-  credentials: true
-};
-
-app.use(cors(corsOptions));
+// Configure CORS - Allow from anywhere
+app.use(cors());
 
 // API Key authentication middleware
 const requireApiKey = (req, res, next) => {
