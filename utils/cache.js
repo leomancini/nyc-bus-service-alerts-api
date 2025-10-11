@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Cache configuration
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes in milliseconds
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes - cache is valid for this long
 const CACHE_DIR = path.join(__dirname, "..", "cache");
 const CACHE_FILE = path.join(CACHE_DIR, "cache.json");
 

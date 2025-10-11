@@ -104,7 +104,7 @@ app.get("/alerts", requireApiKey, async (req, res) => {
         );
         res.json(result);
 
-        // Update cache in background (don't await)
+        // Update cache in background since it's expired
         updateCacheInBackground().catch(() => {});
         return;
       }
@@ -174,7 +174,7 @@ app.get("/summaries", requireApiKey, async (req, res) => {
         );
         res.json({ summaries });
 
-        // Update cache in background (don't await)
+        // Update cache in background since it's expired
         updateCacheInBackground().catch(() => {});
         return;
       }
