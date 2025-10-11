@@ -2,8 +2,9 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import {
-  cache,
   isCacheValid,
+  hasCachedData,
+  getCachedData,
   fetchFromAPI,
   updateCacheInBackground,
   getSummariesFromData,
@@ -78,42 +79,41 @@ app.get("/alerts", requireApiKey, async (req, res) => {
     }
 
     // Check if we have valid cached data
-    if (isCacheValid()) {
+    if (await isCacheValid()) {
       // Return cached data immediately - no background update needed
-      const result = formatAlertsResponse(
-        cache.data,
-        cache.timestamp,
-        maxDuration
-      );
-      return res.json(result);
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const result = formatAlertsResponse(
+          cachedData.data,
+          cachedData.timestamp,
+          maxDuration
+        );
+        return res.json(result);
+      }
     }
 
     // Check if we have any cached data (even if expired)
-    if (cache.data) {
+    if (await hasCachedData()) {
       // Return cached data immediately
-      const result = formatAlertsResponse(
-        cache.data,
-        cache.timestamp,
-        maxDuration
-      );
-      res.json(result);
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const result = formatAlertsResponse(
+          cachedData.data,
+          cachedData.timestamp,
+          maxDuration
+        );
+        res.json(result);
 
-      // Update cache in background (don't await)
-      updateCacheInBackground().catch(() => {});
-      return;
+        // Update cache in background (don't await)
+        updateCacheInBackground().catch(() => {});
+        return;
+      }
     }
 
     // No cache exists - need to fetch data for the first time
     try {
       const freshData = await fetchFromAPI();
-      cache.data = freshData;
-      cache.timestamp = Date.now();
-
-      const result = formatAlertsResponse(
-        freshData,
-        cache.timestamp,
-        maxDuration
-      );
+      const result = formatAlertsResponse(freshData, Date.now(), maxDuration);
       res.json(result);
     } catch (fetchError) {
       throw fetchError;
@@ -149,37 +149,40 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     }
 
     // Check if we have valid cached data
-    if (isCacheValid()) {
-      const summaries = getLCDSummariesFromData(
-        cache.data,
-        maxCharacters,
-        maxStrings,
-        maxDuration
-      );
-      return res.json({ summaries });
+    if (await isCacheValid()) {
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const summaries = getLCDSummariesFromData(
+          cachedData.data,
+          maxCharacters,
+          maxStrings,
+          maxDuration
+        );
+        return res.json({ summaries });
+      }
     }
 
     // Check if we have any cached data (even if expired)
-    if (cache.data) {
-      const summaries = getLCDSummariesFromData(
-        cache.data,
-        maxCharacters,
-        maxStrings,
-        maxDuration
-      );
-      res.json({ summaries });
+    if (await hasCachedData()) {
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const summaries = getLCDSummariesFromData(
+          cachedData.data,
+          maxCharacters,
+          maxStrings,
+          maxDuration
+        );
+        res.json({ summaries });
 
-      // Update cache in background (don't await)
-      updateCacheInBackground().catch(() => {});
-      return;
+        // Update cache in background (don't await)
+        updateCacheInBackground().catch(() => {});
+        return;
+      }
     }
 
     // No cache exists - need to fetch data for the first time
     try {
       const freshData = await fetchFromAPI();
-      cache.data = freshData;
-      cache.timestamp = Date.now();
-
       const summaries = getLCDSummariesFromData(
         freshData,
         maxCharacters,

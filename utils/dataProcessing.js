@@ -2,10 +2,21 @@ import { isRelevantForToday, isWithinDurationLimit } from "./dateUtils.js";
 
 // Function to extract and process situations from API data
 export function extractSituations(data) {
-  return (
+  const situations =
     data?.Siri?.ServiceDelivery?.SituationExchangeDelivery?.[0]?.Situations
-      ?.PtSituationElement || []
-  );
+      ?.PtSituationElement || [];
+
+  // Log memory usage for large datasets
+  if (situations.length > 1000) {
+    const memUsage = process.memoryUsage();
+    console.log(
+      `Processing ${situations.length} situations, heap used: ${Math.round(
+        memUsage.heapUsed / 1024 / 1024
+      )}MB`
+    );
+  }
+
+  return situations;
 }
 
 // Function to filter and sort situations for today
@@ -219,26 +230,42 @@ export function processSummaries(
   maxCharacters = null,
   maxStrings = null
 ) {
-  let summaries = situations.map(formatSummaryWithDates).filter(Boolean);
-
-  if (!maxCharacters) {
-    // No character limit, return summaries as single-line screens
-    const screens = summaries.map((summary) => [summary, "", "", ""]);
-    return maxStrings ? screens.slice(0, maxStrings) : screens;
-  }
-
-  // Convert each summary into screen objects
+  // Process summaries in smaller batches to reduce memory pressure
+  const batchSize = 10;
   const allScreens = [];
   let processedSummaries = 0;
 
-  for (const summary of summaries) {
+  for (let i = 0; i < situations.length; i += batchSize) {
     if (maxStrings && processedSummaries >= maxStrings) {
       break;
     }
 
-    const summaryScreens = createScreensForSummary(summary, maxCharacters);
-    allScreens.push(...summaryScreens);
-    processedSummaries++;
+    const batch = situations.slice(i, i + batchSize);
+    const batchSummaries = batch.map(formatSummaryWithDates).filter(Boolean);
+
+    if (!maxCharacters) {
+      // No character limit, return summaries as single-line screens
+      const screens = batchSummaries.map((summary) => [summary, "", "", ""]);
+      const limitedScreens = maxStrings
+        ? screens.slice(0, maxStrings - processedSummaries)
+        : screens;
+      allScreens.push(...limitedScreens);
+      processedSummaries += limitedScreens.length;
+    } else {
+      // Convert each summary into screen objects
+      for (const summary of batchSummaries) {
+        if (maxStrings && processedSummaries >= maxStrings) {
+          break;
+        }
+
+        const summaryScreens = createScreensForSummary(summary, maxCharacters);
+        allScreens.push(...summaryScreens);
+        processedSummaries++;
+      }
+    }
+
+    // Clear batch references to help garbage collection
+    batch.length = 0;
   }
 
   return allScreens;
