@@ -8,12 +8,28 @@ export function extractSituations(data) {
   );
 }
 
+// Helper function to check if a situation affects Q routes
+function affectsQRoutes(situation) {
+  // Handle cases where Affects structure might be different
+  if (!situation.Affects?.VehicleJourneys?.AffectedVehicleJourney) {
+    return false;
+  }
+
+  const affectedRoutes =
+    situation.Affects.VehicleJourneys.AffectedVehicleJourney.map(
+      (journey) => journey.LineRef?.replace(/^(MTA NYCT_|MTABC_)/, "") || ""
+    ).filter(Boolean) || [];
+
+  return affectedRoutes.some((route) => route.startsWith("Q"));
+}
+
 // Function to filter and sort situations for today
 export function processTodaysSituations(situations, maxDuration = null) {
   const todaysSituations = situations.filter((situation) => {
     return (
       isRelevantForToday(situation) &&
-      isWithinDurationLimit(situation, maxDuration)
+      isWithinDurationLimit(situation, maxDuration) &&
+      affectsQRoutes(situation)
     );
   });
 
