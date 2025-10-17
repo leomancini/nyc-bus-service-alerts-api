@@ -8,8 +8,8 @@ export function extractSituations(data) {
   );
 }
 
-// Helper function to check if a situation affects Q routes
-function affectsQRoutes(situation) {
+// Helper function to check if a situation affects routes with a specific prefix
+function affectsRoutesWithPrefix(situation, routes) {
   // Handle cases where Affects structure might be different
   if (!situation.Affects?.VehicleJourneys?.AffectedVehicleJourney) {
     return false;
@@ -20,16 +20,25 @@ function affectsQRoutes(situation) {
       (journey) => journey.LineRef?.replace(/^(MTA NYCT_|MTABC_)/, "") || ""
     ).filter(Boolean) || [];
 
-  return affectedRoutes.some((route) => route.startsWith("Q"));
+  // If no prefix specified or "ALL", include all routes
+  if (!routes || routes.toUpperCase() === "ALL") {
+    return true;
+  }
+
+  return affectedRoutes.some((route) => route.startsWith(routes.toUpperCase()));
 }
 
 // Function to filter and sort situations for today
-export function processTodaysSituations(situations, maxDuration = null) {
+export function processTodaysSituations(
+  situations,
+  maxDuration = null,
+  routes = "Q"
+) {
   const todaysSituations = situations.filter((situation) => {
     return (
       isRelevantForToday(situation) &&
       isWithinDurationLimit(situation, maxDuration) &&
-      affectsQRoutes(situation)
+      affectsRoutesWithPrefix(situation, routes)
     );
   });
 
@@ -430,10 +439,15 @@ export function getSummariesFromData(
   data,
   maxCharacters,
   maxStrings = 50,
-  maxDuration = null
+  maxDuration = null,
+  routes = "Q"
 ) {
   const situations = extractSituations(data);
-  const todaysSituations = processTodaysSituations(situations, maxDuration);
+  const todaysSituations = processTodaysSituations(
+    situations,
+    maxDuration,
+    routes
+  );
   return processSummaries(todaysSituations, maxCharacters, maxStrings);
 }
 
@@ -442,10 +456,15 @@ export function getLCDSummariesFromData(
   data,
   maxCharacters = null,
   maxStrings = 50,
-  maxDuration = null
+  maxDuration = null,
+  routes = "Q"
 ) {
   const situations = extractSituations(data);
-  const todaysSituations = processTodaysSituations(situations, maxDuration);
+  const todaysSituations = processTodaysSituations(
+    situations,
+    maxDuration,
+    routes
+  );
 
   // Use the new screen-based summaries logic
   return processSummaries(todaysSituations, maxCharacters, maxStrings);
@@ -455,11 +474,16 @@ export function getLCDSummariesFromData(
 export function formatAlertsResponse(
   data,
   cacheAge = null,
-  maxDuration = null
+  maxDuration = null,
+  routes = "Q"
 ) {
   try {
     const situations = extractSituations(data);
-    const todaysSituations = processTodaysSituations(situations, maxDuration);
+    const todaysSituations = processTodaysSituations(
+      situations,
+      maxDuration,
+      routePrefix
+    );
 
     // Format the response
     return {

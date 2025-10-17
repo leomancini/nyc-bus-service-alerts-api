@@ -58,6 +58,7 @@ app.get("/alerts", requireApiKey, async (req, res) => {
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
+    const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
     // Check if we have valid cached data
     if (isCacheValid()) {
@@ -65,7 +66,8 @@ app.get("/alerts", requireApiKey, async (req, res) => {
       const result = formatAlertsResponse(
         cache.data,
         cache.timestamp,
-        maxDuration
+        maxDuration,
+        routes
       );
       return res.json(result);
     }
@@ -76,7 +78,8 @@ app.get("/alerts", requireApiKey, async (req, res) => {
       const result = formatAlertsResponse(
         cache.data,
         cache.timestamp,
-        maxDuration
+        maxDuration,
+        routes
       );
       res.json(result);
 
@@ -94,7 +97,8 @@ app.get("/alerts", requireApiKey, async (req, res) => {
       const result = formatAlertsResponse(
         freshData,
         cache.timestamp,
-        maxDuration
+        maxDuration,
+        routes
       );
       res.json(result);
     } catch (fetchError) {
@@ -117,6 +121,7 @@ app.get("/summaries", requireApiKey, async (req, res) => {
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
       : null;
+    const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
     // Check if we have valid cached data
     if (isCacheValid()) {
@@ -124,7 +129,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
         cache.data,
         maxCharacters,
         maxStrings,
-        maxDuration
+        maxDuration,
+        routes
       );
       return res.json({ summaries });
     }
@@ -135,7 +141,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
         cache.data,
         maxCharacters,
         maxStrings,
-        maxDuration
+        maxDuration,
+        routes
       );
       res.json({ summaries });
 
@@ -154,7 +161,8 @@ app.get("/summaries", requireApiKey, async (req, res) => {
         freshData,
         maxCharacters,
         maxStrings,
-        maxDuration
+        maxDuration,
+        routes
       );
       res.json({ summaries });
     } catch (fetchError) {
