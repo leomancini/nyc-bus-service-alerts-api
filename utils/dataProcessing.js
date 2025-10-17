@@ -2,10 +2,21 @@ import { isRelevantForToday, isWithinDurationLimit } from "./dateUtils.js";
 
 // Function to extract and process situations from API data
 export function extractSituations(data) {
-  return (
+  const situations =
     data?.Siri?.ServiceDelivery?.SituationExchangeDelivery?.[0]?.Situations
-      ?.PtSituationElement || []
-  );
+      ?.PtSituationElement || [];
+
+  // Log memory usage for large datasets
+  if (situations.length > 1000) {
+    const memUsage = process.memoryUsage();
+    console.log(
+      `Processing ${situations.length} situations, heap used: ${Math.round(
+        memUsage.heapUsed / 1024 / 1024
+      )}MB`
+    );
+  }
+
+  return situations;
 }
 
 // Helper function to check if a situation affects routes with a specific prefix
@@ -244,26 +255,42 @@ export function processSummaries(
   maxCharacters = null,
   maxStrings = null
 ) {
-  let summaries = situations.map(formatSummaryWithDates).filter(Boolean);
-
-  if (!maxCharacters) {
-    // No character limit, return summaries as single-line screens
-    const screens = summaries.map((summary) => [summary, "", "", ""]);
-    return maxStrings ? screens.slice(0, maxStrings) : screens;
-  }
-
-  // Convert each summary into screen objects
+  // Process summaries in smaller batches to reduce memory pressure
+  const batchSize = 10;
   const allScreens = [];
   let processedSummaries = 0;
 
-  for (const summary of summaries) {
+  for (let i = 0; i < situations.length; i += batchSize) {
     if (maxStrings && processedSummaries >= maxStrings) {
       break;
     }
 
-    const summaryScreens = createScreensForSummary(summary, maxCharacters);
-    allScreens.push(...summaryScreens);
-    processedSummaries++;
+    const batch = situations.slice(i, i + batchSize);
+    const batchSummaries = batch.map(formatSummaryWithDates).filter(Boolean);
+
+    if (!maxCharacters) {
+      // No character limit, return summaries as single-line screens
+      const screens = batchSummaries.map((summary) => [summary, "", "", ""]);
+      const limitedScreens = maxStrings
+        ? screens.slice(0, maxStrings - processedSummaries)
+        : screens;
+      allScreens.push(...limitedScreens);
+      processedSummaries += limitedScreens.length;
+    } else {
+      // Convert each summary into screen objects
+      for (const summary of batchSummaries) {
+        if (maxStrings && processedSummaries >= maxStrings) {
+          break;
+        }
+
+        const summaryScreens = createScreensForSummary(summary, maxCharacters);
+        allScreens.push(...summaryScreens);
+        processedSummaries++;
+      }
+    }
+
+    // Clear batch references to help garbage collection
+    batch.length = 0;
   }
 
   return allScreens;
@@ -276,9 +303,6 @@ function createScreensForSummary(summary, maxCharacters) {
   // Get all words from the summary
   const cleanText = summary.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
   const allWords = cleanText.split(" ").filter((word) => word.trim());
-
-  console.log("Original summary:", summary);
-  console.log("Total words:", allWords.length, allWords);
 
   if (allWords.length === 0) return [["", "", "", ""]];
 
@@ -344,11 +368,6 @@ function createScreensForSummary(summary, maxCharacters) {
     screens.push(screen);
   }
 
-  console.log(
-    "Screens with conservative space allocation:",
-    JSON.stringify(screens, null, 2)
-  );
-
   // PHASE 2: Add decorative elements only where they fit without displacing content
   if (screens.length > 1) {
     for (let screenIndex = 0; screenIndex < screens.length; screenIndex++) {
@@ -387,9 +406,6 @@ function createScreensForSummary(summary, maxCharacters) {
         } else {
           // Can't fit counter - just keep original content
           screen[lastNonEmptyIndex] = finalLine;
-          console.log(
-            `Counter ${counter} doesn't fit, keeping original content`
-          );
         }
       } else {
         // Empty screen, just put counter
@@ -397,11 +413,6 @@ function createScreensForSummary(summary, maxCharacters) {
       }
     }
   }
-
-  console.log(
-    "Final screens with decorative elements:",
-    JSON.stringify(screens, null, 2)
-  );
 
   // VERIFICATION: Ensure all words are preserved
   const finalText = screens
@@ -427,8 +438,6 @@ function createScreensForSummary(summary, maxCharacters) {
       "Missing words:",
       allWords.filter((w) => !finalWords.includes(w))
     );
-  } else {
-    console.log("✓ All words preserved!");
   }
 
   return screens;

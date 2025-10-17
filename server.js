@@ -1,38 +1,50 @@
 import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
 import {
-  cache,
   isCacheValid,
+  hasCachedData,
+  getCachedData,
   fetchFromAPI,
   updateCacheInBackground,
   getSummariesFromData,
   getLCDSummariesFromData,
   formatAlertsResponse
 } from "./utils/index.js";
+import { getSampleData } from "./utils/sampleData.js";
 
 dotenv.config();
 
 const app = express();
 const port = 3114;
 
+// Configure CORS - Allow from anywhere
+app.use(cors());
+
 // API Key authentication middleware
 const requireApiKey = (req, res, next) => {
   const providedApiKey = req.query.apiKey;
   const validApiKey = process.env.NOSHADOWS_NYC_BUS_SERVICE_ALERTS_API_KEY;
-
-  if (!validApiKey) {
-    return res.status(500).json({
-      error: "Server configuration error",
-      message: "API key not configured on server",
-      timestamp: new Date().toISOString()
-    });
-  }
 
   if (!providedApiKey) {
     return res.status(401).json({
       error: "Unauthorized",
       message:
         "API key is required. Please provide apiKey parameter in the URL",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // Allow demo mode
+  if (providedApiKey === "DEMO") {
+    req.isDemoMode = true;
+    return next();
+  }
+
+  if (!validApiKey) {
+    return res.status(500).json({
+      error: "Server configuration error",
+      message: "API key not configured on server",
       timestamp: new Date().toISOString()
     });
   }
@@ -60,43 +72,58 @@ app.get("/alerts", requireApiKey, async (req, res) => {
       : null;
     const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
-    // Check if we have valid cached data
-    if (isCacheValid()) {
-      // Return cached data immediately - no background update needed
+    // Handle demo mode
+    if (req.isDemoMode) {
+      const sampleData = getSampleData();
       const result = formatAlertsResponse(
-        cache.data,
-        cache.timestamp,
+        sampleData,
+        Date.now(),
         maxDuration,
         routes
       );
       return res.json(result);
     }
 
-    // Check if we have any cached data (even if expired)
-    if (cache.data) {
-      // Return cached data immediately
-      const result = formatAlertsResponse(
-        cache.data,
-        cache.timestamp,
-        maxDuration,
-        routes
-      );
-      res.json(result);
+    // Check if we have valid cached data
+    if (await isCacheValid()) {
+      // Return cached data immediately - no background update needed
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const result = formatAlertsResponse(
+          cachedData.data,
+          cachedData.timestamp,
+          maxDuration,
+          routes
+        );
+        return res.json(result);
+      }
+    }
 
-      // Update cache in background (don't await)
-      updateCacheInBackground().catch(() => {});
-      return;
+    // Check if we have any cached data (even if expired)
+    if (await hasCachedData()) {
+      // Return cached data immediately
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const result = formatAlertsResponse(
+          cachedData.data,
+          cachedData.timestamp,
+          maxDuration,
+          routes
+        );
+        res.json(result);
+
+        // Update cache in background since it's expired
+        updateCacheInBackground().catch(() => {});
+        return;
+      }
     }
 
     // No cache exists - need to fetch data for the first time
     try {
       const freshData = await fetchFromAPI();
-      cache.data = freshData;
-      cache.timestamp = Date.now();
-
       const result = formatAlertsResponse(
         freshData,
-        cache.timestamp,
+        Date.now(),
         maxDuration,
         routes
       );
@@ -123,10 +150,11 @@ app.get("/summaries", requireApiKey, async (req, res) => {
       : null;
     const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
-    // Check if we have valid cached data
-    if (isCacheValid()) {
+    // Handle demo mode
+    if (req.isDemoMode) {
+      const sampleData = getSampleData();
       const summaries = getLCDSummariesFromData(
-        cache.data,
+        sampleData,
         maxCharacters,
         maxStrings,
         maxDuration,
@@ -135,28 +163,43 @@ app.get("/summaries", requireApiKey, async (req, res) => {
       return res.json({ summaries });
     }
 
-    // Check if we have any cached data (even if expired)
-    if (cache.data) {
-      const summaries = getLCDSummariesFromData(
-        cache.data,
-        maxCharacters,
-        maxStrings,
-        maxDuration,
-        routes
-      );
-      res.json({ summaries });
+    // Check if we have valid cached data
+    if (await isCacheValid()) {
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const summaries = getLCDSummariesFromData(
+          cachedData.data,
+          maxCharacters,
+          maxStrings,
+          maxDuration,
+          routes
+        );
+        return res.json({ summaries });
+      }
+    }
 
-      // Update cache in background (don't await)
-      updateCacheInBackground().catch(() => {});
-      return;
+    // Check if we have any cached data (even if expired)
+    if (await hasCachedData()) {
+      const cachedData = await getCachedData();
+      if (cachedData) {
+        const summaries = getLCDSummariesFromData(
+          cachedData.data,
+          maxCharacters,
+          maxStrings,
+          maxDuration,
+          routes
+        );
+        res.json({ summaries });
+
+        // Update cache in background since it's expired
+        updateCacheInBackground().catch(() => {});
+        return;
+      }
     }
 
     // No cache exists - need to fetch data for the first time
     try {
       const freshData = await fetchFromAPI();
-      cache.data = freshData;
-      cache.timestamp = Date.now();
-
       const summaries = getLCDSummariesFromData(
         freshData,
         maxCharacters,
