@@ -5,8 +5,9 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node --max-old-space-size=4096 /home/leo/services/nyc-bus-service-alerts-api/server.js",
-    "dev": "nodemon --exec \"node --max-old-space-size=4096\" server.js"
+    "start": "node --max-old-space-size=1024 --expose-gc --optimize-for-size /home/leo/services/nyc-bus-service-alerts-api/server.js",
+    "dev": "nodemon --exec \"node --max-old-space-size=1024 --expose-gc --optimize-for-size\" server.js",
+    "dev-debug": "nodemon --exec \"node --max-old-space-size=2048 --expose-gc --optimize-for-size --inspect\" server.js"
   },
   "author": "",
   "license": "ISC",

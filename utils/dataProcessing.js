@@ -256,7 +256,7 @@ export function processSummaries(
   maxStrings = null
 ) {
   // Process summaries in smaller batches to reduce memory pressure
-  const batchSize = 10;
+  const batchSize = 5; // Reduced batch size for better memory management
   const allScreens = [];
   let processedSummaries = 0;
 
@@ -266,31 +266,47 @@ export function processSummaries(
     }
 
     const batch = situations.slice(i, i + batchSize);
-    const batchSummaries = batch.map(formatSummaryWithDates).filter(Boolean);
 
-    if (!maxCharacters) {
-      // No character limit, return summaries as single-line screens
-      const screens = batchSummaries.map((summary) => [summary, "", "", ""]);
-      const limitedScreens = maxStrings
-        ? screens.slice(0, maxStrings - processedSummaries)
-        : screens;
-      allScreens.push(...limitedScreens);
-      processedSummaries += limitedScreens.length;
-    } else {
-      // Convert each summary into screen objects
-      for (const summary of batchSummaries) {
-        if (maxStrings && processedSummaries >= maxStrings) {
-          break;
-        }
+    // Process each item individually to avoid accumulating intermediate arrays
+    for (let j = 0; j < batch.length; j++) {
+      if (maxStrings && processedSummaries >= maxStrings) {
+        break;
+      }
 
+      const situation = batch[j];
+      const summary = formatSummaryWithDates(situation);
+
+      if (!summary) continue;
+
+      if (!maxCharacters) {
+        // No character limit, return summaries as single-line screens
+        allScreens.push([summary, "", "", ""]);
+        processedSummaries++;
+      } else {
+        // Convert summary into screen objects
         const summaryScreens = createScreensForSummary(summary, maxCharacters);
         allScreens.push(...summaryScreens);
         processedSummaries++;
+
+        // Clear screen references immediately after use
+        summaryScreens.length = 0;
       }
+
+      // Nullify processed situation to help GC
+      batch[j] = null;
     }
 
-    // Clear batch references to help garbage collection
+    // Clear batch completely
     batch.length = 0;
+
+    // Force garbage collection hint every few batches if available
+    if (
+      i % (batchSize * 4) === 0 &&
+      global.gc &&
+      process.env.NODE_ENV !== "production"
+    ) {
+      global.gc();
+    }
   }
 
   return allScreens;
@@ -300,7 +316,7 @@ export function processSummaries(
 function createScreensForSummary(summary, maxCharacters) {
   if (!summary || !maxCharacters) return [["", "", "", ""]];
 
-  // Get all words from the summary
+  // Get all words from the summary - avoid creating intermediate arrays
   const cleanText = summary.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
   const allWords = cleanText.split(" ").filter((word) => word.trim());
 
@@ -343,15 +359,17 @@ function createScreensForSummary(summary, maxCharacters) {
         availableSpace -= ellipsisLength;
       }
 
-      // Fill remaining space with words
+      // Fill remaining space with words - minimize string concatenations
       let isFirstWordOnLine = currentLine === "" || currentLine === "...";
+      const lineWords = [];
+
       while (wordIndex < allWords.length) {
         const word = allWords[wordIndex];
         const separator = isFirstWordOnLine ? "" : " ";
-        const testLine = `${currentLine}${separator}${word}`;
+        const testLength = currentLine.length + separator.length + word.length;
 
-        if (testLine.length <= availableSpace) {
-          currentLine = testLine;
+        if (testLength <= availableSpace) {
+          lineWords.push(word);
           wordIndex++;
           isFirstWordOnLine = false;
         } else {
@@ -359,7 +377,19 @@ function createScreensForSummary(summary, maxCharacters) {
         }
       }
 
+      // Build final line only once
+      if (lineWords.length > 0) {
+        if (currentLine === "...") {
+          currentLine = "..." + lineWords.join(" ");
+        } else {
+          currentLine = lineWords.join(" ");
+        }
+      }
+
       screen[lineIndex] = currentLine.trim();
+
+      // Clear temporary array immediately
+      lineWords.length = 0;
 
       // If we've used all words, break
       if (wordIndex >= allWords.length) break;
@@ -414,30 +444,32 @@ function createScreensForSummary(summary, maxCharacters) {
     }
   }
 
-  // VERIFICATION: Ensure all words are preserved
-  const finalText = screens
-    .map((screen) =>
-      screen
-        .join(" ")
-        .replace(/\.\.\./g, "") // Remove ellipsis
-        .replace(/\(\d+\/\d+\)/g, "") // Remove counters
-        .replace(/\s+/g, " ")
-        .trim()
-    )
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // VERIFICATION: Ensure all words are preserved (lightweight check)
+  if (process.env.NODE_ENV === "development") {
+    // Only perform expensive verification in development
+    let wordCount = 0;
+    for (const screen of screens) {
+      for (const line of screen) {
+        const cleanLine = line
+          .replace(/\.\.\./g, "") // Remove ellipsis
+          .replace(/\(\d+\/\d+\)/g, "") // Remove counters
+          .trim();
+        if (cleanLine) {
+          wordCount += cleanLine
+            .split(" ")
+            .filter((word) => word.trim()).length;
+        }
+      }
+    }
 
-  const finalWords = finalText.split(" ").filter((word) => word.trim());
-
-  if (allWords.length !== finalWords.length) {
-    console.error("WORD COUNT MISMATCH!");
-    console.error("Original words:", allWords.length, allWords);
-    console.error("Final words:", finalWords.length, finalWords);
-    console.error(
-      "Missing words:",
-      allWords.filter((w) => !finalWords.includes(w))
-    );
+    if (allWords.length !== wordCount) {
+      console.error(
+        "WORD COUNT MISMATCH! Expected:",
+        allWords.length,
+        "Got:",
+        wordCount
+      );
+    }
   }
 
   return screens;
@@ -457,7 +489,14 @@ export function getSummariesFromData(
     maxDuration,
     routes
   );
-  return processSummaries(todaysSituations, maxCharacters, maxStrings);
+  const result = processSummaries(todaysSituations, maxCharacters, maxStrings);
+
+  // Force garbage collection after processing if available
+  if (global.gc && process.env.NODE_ENV !== "production") {
+    global.gc();
+  }
+
+  return result;
 }
 
 // Function to get LCD-formatted summaries from data
@@ -476,7 +515,14 @@ export function getLCDSummariesFromData(
   );
 
   // Use the new screen-based summaries logic
-  return processSummaries(todaysSituations, maxCharacters, maxStrings);
+  const result = processSummaries(todaysSituations, maxCharacters, maxStrings);
+
+  // Force garbage collection after processing if available
+  if (global.gc && process.env.NODE_ENV !== "production") {
+    global.gc();
+  }
+
+  return result;
 }
 
 // Function to process and format the API data for full alerts response
@@ -491,34 +537,60 @@ export function formatAlertsResponse(
     const todaysSituations = processTodaysSituations(
       situations,
       maxDuration,
-      routePrefix
+      routes
     );
+
+    // Pre-calculate values to avoid repeated computation
+    const now = Date.now();
+    const fetchedAtISO = new Date().toISOString();
+    const cachedAtISO = cacheAge ? new Date(cacheAge).toISOString() : null;
+    const cacheAgeMinutes = cacheAge
+      ? Math.floor((now - cacheAge) / 1000 / 60)
+      : null;
+    const maxDurationFilterText = maxDuration ? `${maxDuration} days` : null;
+
+    // Process alerts efficiently to minimize object creation
+    const alerts = todaysSituations.map((situation) => {
+      // Pre-extract frequently accessed nested properties
+      const publicationWindow = situation.PublicationWindow;
+      const affects = situation.Affects;
+      const vehicleJourneys = affects?.VehicleJourneys?.AffectedVehicleJourney;
+
+      // Process affected routes efficiently
+      let affectedRoutes = [];
+      if (vehicleJourneys && vehicleJourneys.length) {
+        const routeSet = new Set();
+        for (const journey of vehicleJourneys) {
+          const lineRef = journey.LineRef;
+          if (lineRef) {
+            const cleanRoute = lineRef.replace(/^(MTA NYCT_|MTABC_)/, "");
+            if (cleanRoute) {
+              routeSet.add(cleanRoute);
+            }
+          }
+        }
+        affectedRoutes = Array.from(routeSet);
+      }
+
+      return {
+        summary: situation.Summary,
+        description: situation.Description,
+        effectiveStart: publicationWindow?.StartTime,
+        effectiveEnd: publicationWindow?.EndTime,
+        affectedRoutes,
+        createdAt: situation.CreationTime
+      };
+    });
 
     // Format the response
     return {
-      fetchedAt: new Date().toISOString(),
-      cachedAt: cacheAge ? new Date(cacheAge).toISOString() : null,
-      cacheAge: cacheAge
-        ? Math.floor((Date.now() - cacheAge) / 1000 / 60)
-        : null, // age in minutes
+      fetchedAt: fetchedAtISO,
+      cachedAt: cachedAtISO,
+      cacheAge: cacheAgeMinutes,
       totalSituations: situations.length,
       situationsForToday: todaysSituations.length,
-      maxDurationFilter: maxDuration ? `${maxDuration} days` : null,
-      alerts: todaysSituations.map((situation) => ({
-        summary: situation.Summary,
-        description: situation.Description,
-        effectiveStart: situation.PublicationWindow?.StartTime,
-        effectiveEnd: situation.PublicationWindow?.EndTime,
-        affectedRoutes: [
-          ...new Set(
-            situation.Affects?.VehicleJourneys?.AffectedVehicleJourney?.map(
-              (journey) =>
-                journey.LineRef?.replace(/^(MTA NYCT_|MTABC_)/, "") || ""
-            ).filter(Boolean) || []
-          )
-        ],
-        createdAt: situation.CreationTime
-      }))
+      maxDurationFilter: maxDurationFilterText,
+      alerts
     };
   } catch (error) {
     throw error;

@@ -96,15 +96,52 @@ export async function getCachedData() {
   }
 }
 
-// Function to log memory usage
+// Memory limits configuration
+const MEMORY_LIMITS = {
+  maxHeapUsed: 500 * 1024 * 1024, // 500MB heap limit
+  maxRSS: 1000 * 1024 * 1024, // 1GB RSS limit
+  warningThreshold: 0.8 // Warn at 80% of limits
+};
+
+// Function to log memory usage and check limits
 function logMemoryUsage(context = "") {
   const memUsage = process.memoryUsage();
-  console.log(`Memory Usage ${context}:`, {
+  const memInfo = {
     rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
     heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
     heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
     external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
-  });
+  };
+
+  console.log(`Memory Usage ${context}:`, memInfo);
+
+  // Check memory limits
+  const heapUsedPercent = memUsage.heapUsed / MEMORY_LIMITS.maxHeapUsed;
+  const rssPercent = memUsage.rss / MEMORY_LIMITS.maxRSS;
+
+  if (
+    heapUsedPercent > MEMORY_LIMITS.warningThreshold ||
+    rssPercent > MEMORY_LIMITS.warningThreshold
+  ) {
+    console.warn(
+      `Memory usage warning - Heap: ${Math.round(
+        heapUsedPercent * 100
+      )}%, RSS: ${Math.round(rssPercent * 100)}%`
+    );
+
+    // Force garbage collection if available and we're over 90%
+    if ((heapUsedPercent > 0.9 || rssPercent > 0.9) && global.gc) {
+      console.log("Forcing garbage collection due to high memory usage");
+      global.gc();
+    }
+  }
+
+  // Return memory info for potential error handling
+  return {
+    heapUsedPercent,
+    rssPercent,
+    isOverLimit: heapUsedPercent > 1.0 || rssPercent > 1.0
+  };
 }
 
 // Function to fetch fresh data from API and cache it
@@ -114,7 +151,12 @@ export async function fetchFromAPI() {
     throw new Error("MTA_BUS_TIME_API_KEY not configured in .env file");
   }
 
-  logMemoryUsage("before API fetch");
+  const memCheck1 = logMemoryUsage("before API fetch");
+
+  // Check if we're already at memory limits before fetching
+  if (memCheck1.isOverLimit) {
+    throw new Error("Memory limit exceeded before API fetch");
+  }
 
   const apiUrl = `https://api.prod.obanyc.com/api/siri/vehicle-monitoring.json?key=${apiKey}`;
   const response = await fetch(apiUrl);
@@ -124,7 +166,16 @@ export async function fetchFromAPI() {
   }
 
   const data = await response.json();
-  logMemoryUsage("after API fetch and JSON parse");
+  const memCheck2 = logMemoryUsage("after API fetch and JSON parse");
+
+  // Check memory after parsing JSON
+  if (memCheck2.isOverLimit) {
+    console.error("Memory limit exceeded after JSON parse - forcing cleanup");
+    if (global.gc) {
+      global.gc();
+      logMemoryUsage("after emergency garbage collection");
+    }
+  }
 
   // Cache the data to file system
   await cacheDataToFile(data);
