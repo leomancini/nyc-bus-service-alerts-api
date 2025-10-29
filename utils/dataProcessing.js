@@ -359,17 +359,16 @@ function createScreensForSummary(summary, maxCharacters) {
         availableSpace -= ellipsisLength;
       }
 
-      // Fill remaining space with words - minimize string concatenations
+      // Fill remaining space with words
       let isFirstWordOnLine = currentLine === "" || currentLine === "...";
-      const lineWords = [];
 
       while (wordIndex < allWords.length) {
         const word = allWords[wordIndex];
         const separator = isFirstWordOnLine ? "" : " ";
-        const testLength = currentLine.length + separator.length + word.length;
+        const testLine = `${currentLine}${separator}${word}`;
 
-        if (testLength <= availableSpace) {
-          lineWords.push(word);
+        if (testLine.length <= availableSpace) {
+          currentLine = testLine;
           wordIndex++;
           isFirstWordOnLine = false;
         } else {
@@ -377,19 +376,7 @@ function createScreensForSummary(summary, maxCharacters) {
         }
       }
 
-      // Build final line only once
-      if (lineWords.length > 0) {
-        if (currentLine === "...") {
-          currentLine = "..." + lineWords.join(" ");
-        } else {
-          currentLine = lineWords.join(" ");
-        }
-      }
-
       screen[lineIndex] = currentLine.trim();
-
-      // Clear temporary array immediately
-      lineWords.length = 0;
 
       // If we've used all words, break
       if (wordIndex >= allWords.length) break;
