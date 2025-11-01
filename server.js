@@ -69,7 +69,7 @@ app.get("/alerts", requireApiKey, async (req, res) => {
     // Parse query parameters
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
-      : null;
+      : 30;
     const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
     // Handle demo mode
@@ -143,11 +143,11 @@ app.get("/alerts", requireApiKey, async (req, res) => {
 app.get("/summaries", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
-    const maxCharacters = parseInt(req.query.maxCharacters) || null;
-    const maxStrings = parseInt(req.query.maxStrings) || 50; // Default to 50 strings
+    const maxCharacters = parseInt(req.query.maxCharacters) || 20;
+    const maxStrings = parseInt(req.query.maxStrings) || 100; // Default to 100 strings
     const maxDuration = req.query.maxDuration
       ? parseInt(req.query.maxDuration)
-      : null;
+      : 30;
     const routes = req.query.routes !== undefined ? req.query.routes : "Q";
 
     // Handle demo mode
