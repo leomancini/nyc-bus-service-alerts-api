@@ -102,6 +102,9 @@ export function formatSummaryWithDates(situation) {
     ? new Date(situation.PublicationWindow.EndTime)
     : null;
 
+  // Get current year for comparison
+  const currentYear = new Date().getFullYear();
+
   // Add date info to summary with readable formatting
   if (startDateObj && endDateObj) {
     const startMonth = startDateObj.getMonth();
@@ -133,23 +136,28 @@ export function formatSummaryWithDates(situation) {
       startDay === endDay &&
       startYear === endYear
     ) {
-      const formattedDate = `${monthNames[startMonth]} ${startDay}, ${startYear}`;
+      // Single date - include year only if different from current year
+      const yearSuffix = startYear !== currentYear ? `, ${startYear}` : "";
+      const formattedDate = `${monthNames[startMonth]} ${startDay}${yearSuffix}`;
       summary = `${formattedDate}: ${summary}`;
     } else if (startYear === endYear) {
-      // Same year
+      // Same year - include year only if different from current year
+      const yearSuffix = startYear !== currentYear ? `, ${startYear}` : "";
       if (startMonth === endMonth) {
-        // Same month and year: "Sep 1-2, 2025"
-        const formattedDate = `${monthNames[startMonth]} ${startDay}-${endDay}, ${startYear}`;
+        // Same month and year: "Sep 1-2" or "Sep 1-2, 2025"
+        const formattedDate = `${monthNames[startMonth]} ${startDay}-${endDay}${yearSuffix}`;
         summary = `${formattedDate}: ${summary}`;
       } else {
-        // Different months, same year: "Sep 23 - Oct 3, 2025"
-        const formattedDate = `${monthNames[startMonth]} ${startDay} - ${monthNames[endMonth]} ${endDay}, ${startYear}`;
+        // Different months, same year: "Sep 23 - Oct 3" or "Sep 23 - Oct 3, 2025"
+        const formattedDate = `${monthNames[startMonth]} ${startDay} - ${monthNames[endMonth]} ${endDay}${yearSuffix}`;
         summary = `${formattedDate}: ${summary}`;
       }
     } else {
-      // Different years: "Dec 12, 2025 - Jan 3, 2026"
-      const startFormatted = `${monthNames[startMonth]} ${startDay}, ${startYear}`;
-      const endFormatted = `${monthNames[endMonth]} ${endDay}, ${endYear}`;
+      // Different years: always show years when they differ
+      const startYearSuffix = startYear !== currentYear ? `, ${startYear}` : "";
+      const endYearSuffix = endYear !== currentYear ? `, ${endYear}` : "";
+      const startFormatted = `${monthNames[startMonth]} ${startDay}${startYearSuffix}`;
+      const endFormatted = `${monthNames[endMonth]} ${endDay}${endYearSuffix}`;
       summary = `${startFormatted} - ${endFormatted}: ${summary}`;
     }
   } else if (startDateObj) {
@@ -171,7 +179,9 @@ export function formatSummaryWithDates(situation) {
       "Nov",
       "Dec"
     ];
-    const formattedDate = `${monthNames[startMonth]} ${startDay}, ${startYear} ${startTime}`;
+    // Include year only if different from current year
+    const yearSuffix = startYear !== currentYear ? `, ${startYear}` : "";
+    const formattedDate = `${monthNames[startMonth]} ${startDay}${yearSuffix} ${startTime}`;
     summary = `${formattedDate} - now: ${summary}`;
   }
 
