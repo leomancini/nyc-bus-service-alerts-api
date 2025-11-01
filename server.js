@@ -60,10 +60,6 @@ const requireApiKey = (req, res, next) => {
   next();
 };
 
-app.get("/", (req, res) => {
-  res.send("Hello world!");
-});
-
 app.get("/alerts", requireApiKey, async (req, res) => {
   try {
     // Parse query parameters
