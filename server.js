@@ -216,4 +216,9 @@ app.get("/summaries", requireApiKey, async (req, res) => {
   }
 });
 
-app.listen(port, () => {});
+app.listen(port, () => {
+  // Warm the cache on startup so the first request doesn't hit an empty MTA response
+  fetchFromAPI().catch((err) => {
+    console.error("Cache warm-up failed:", err.message);
+  });
+});
